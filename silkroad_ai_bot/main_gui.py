@@ -14,13 +14,14 @@ from PyQt5.QtWidgets import (
     QTabWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QGroupBox,
     QFormLayout, QSpinBox, QCheckBox, QComboBox, QProgressBar,
     QStatusBar, QFrame, QGridLayout, QMessageBox, QListWidget,
-    QListWidgetItem, QSplitter, QScrollArea
+    QListWidgetItem, QSplitter, QScrollArea, QFileDialog
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt5.QtGui import QFont, QTextCursor, QColor, QIcon
 
 from ai_core import SilkroadAICore
 from news_fetcher import NewsFetcher
+from game_launcher import GameLauncher
 
 CONFIG_FILE = "bot_config.json"
 
@@ -71,6 +72,7 @@ class MainWindow(QMainWindow):
         self.config = self._load_config()
         self.start_time = None
         self.news_fetcher = None
+        self._launcher = None
         self._setup_ui()
         self._apply_theme()
         self._log("مرحباً بك في Silkroad AI Bot — نظام التحكم الذكي", "success")
@@ -173,13 +175,87 @@ class MainWindow(QMainWindow):
             f3.addRow("", chk)
         g3.setLayout(f3)
 
+        # Game Launcher
+        g4 = QGroupBox("🎮 مسار اللعبة وملف التشغيل"); f4 = QFormLayout()
+
+        # Game EXE path
+        self.e_game_exe = QLineEdit(self.config.get("game_exe_path", ""))
+        self.e_game_exe.setPlaceholderText(r"مثال: C:\Silkroad\sro_client.exe")
+        row_game = QHBoxLayout()
+        row_game.addWidget(self.e_game_exe)
+        btn_browse_game = QPushButton("📂 تصفح")
+        btn_browse_game.setMaximumWidth(75)
+        btn_browse_game.clicked.connect(lambda: self._browse_exe(self.e_game_exe, "ملف تشغيل اللعبة"))
+        row_game.addWidget(btn_browse_game)
+        btn_detect = QPushButton("🔍 كشف تلقائي")
+        btn_detect.setMaximumWidth(110)
+        btn_detect.setStyleSheet("background:#1A3A5C;")
+        btn_detect.clicked.connect(self._auto_detect_game)
+        row_game.addWidget(btn_detect)
+        f4.addRow("ملف اللعبة (.exe):", row_game)
+
+        # Game folder
+        self.e_game_folder = QLineEdit(self.config.get("game_folder", ""))
+        self.e_game_folder.setPlaceholderText(r"مثال: C:\Silkroad")
+        row_folder = QHBoxLayout()
+        row_folder.addWidget(self.e_game_folder)
+        btn_browse_folder = QPushButton("📂 تصفح")
+        btn_browse_folder.setMaximumWidth(75)
+        btn_browse_folder.clicked.connect(self._browse_folder)
+        row_folder.addWidget(btn_browse_folder)
+        btn_scan = QPushButton("🔎 فحص المجلد")
+        btn_scan.setMaximumWidth(110)
+        btn_scan.setStyleSheet("background:#1A3A1A;")
+        btn_scan.clicked.connect(self._scan_game_folder)
+        row_folder.addWidget(btn_scan)
+        f4.addRow("مجلد اللعبة:", row_folder)
+
+        # phBot EXE path
+        self.e_phbot_exe = QLineEdit(self.config.get("phbot_exe_path", ""))
+        self.e_phbot_exe.setPlaceholderText(r"مثال: C:\phBot\phBot.exe")
+        row_phbot = QHBoxLayout()
+        row_phbot.addWidget(self.e_phbot_exe)
+        btn_browse_phbot = QPushButton("📂 تصفح")
+        btn_browse_phbot.setMaximumWidth(75)
+        btn_browse_phbot.clicked.connect(lambda: self._browse_exe(self.e_phbot_exe, "ملف phBot"))
+        row_phbot.addWidget(btn_browse_phbot)
+        f4.addRow("ملف phBot (اختياري):", row_phbot)
+
+        # Launch args
+        self.e_launch_args = QLineEdit(self.config.get("game_launch_args", ""))
+        self.e_launch_args.setPlaceholderText("مثال: /data /language:arabic  (اتركه فارغاً إذا لم تكن متأكداً)")
+        f4.addRow("وسيطات التشغيل:", self.e_launch_args)
+
+        # Startup wait
+        self.e_startup_wait = QSpinBox()
+        self.e_startup_wait.setRange(3, 60)
+        self.e_startup_wait.setValue(self.config.get("game_startup_wait", 8))
+        self.e_startup_wait.setSuffix(" ثانية")
+        f4.addRow("انتظار تحميل اللعبة:", self.e_startup_wait)
+
+        self.chk_auto_restart = QCheckBox("إعادة تشغيل اللعبة تلقائياً إذا أُغلقت")
+        self.chk_auto_restart.setChecked(self.config.get("auto_restart_game", False))
+        self.chk_launch_on_start = QCheckBox("تشغيل اللعبة تلقائياً عند تشغيل البوت")
+        self.chk_launch_on_start.setChecked(self.config.get("launch_on_bot_start", False))
+        f4.addRow("", self.chk_auto_restart)
+        f4.addRow("", self.chk_launch_on_start)
+        g4.setLayout(f4)
+
+        # Exe list (scan results)
+        self.exe_list_label = QLabel("")
+        self.exe_list_label.setStyleSheet("color:#87CEEB; font-size:10px;")
+        self.exe_list_label.setWordWrap(True)
+
         btn = QPushButton("💾 حفظ الإعدادات")
         btn.setMinimumHeight(40)
         btn.setStyleSheet("background:#1B5E20; font-size:14px; font-weight:bold;")
         btn.clicked.connect(self._save_config)
 
         row1 = QHBoxLayout(); row1.addWidget(g1); row1.addWidget(g2)
-        lay.addLayout(row1); lay.addWidget(g3); lay.addWidget(btn)
+        row2 = QHBoxLayout(); row2.addWidget(g3); row2.addWidget(g4)
+        lay.addLayout(row1); lay.addLayout(row2)
+        lay.addWidget(self.exe_list_label)
+        lay.addWidget(btn)
         return w
 
     # ─── Bot Control ──────────────────────────────────────────────────────
@@ -205,9 +281,33 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.mp_bar, 3, 0, 1, 4)
         g_status.setLayout(grid)
 
-        g_ctrl = QGroupBox("🎮 التحكم"); h = QHBoxLayout()
-        self.btn_start = QPushButton("▶️ تشغيل")
-        self.btn_stop  = QPushButton("⏹️ إيقاف")
+        # Game process status panel
+        g_game = QGroupBox("🎮 حالة اللعبة")
+        game_layout = QHBoxLayout()
+        self.lbl_game_status  = QLabel("⚪ اللعبة: غير مشغّلة")
+        self.lbl_phbot_status = QLabel("⚪ phBot: غير مشغّل")
+        self.lbl_game_status.setStyleSheet("color:#AAAAAA; font-weight:bold;")
+        self.lbl_phbot_status.setStyleSheet("color:#AAAAAA; font-weight:bold;")
+        btn_launch_game  = QPushButton("🚀 تشغيل اللعبة")
+        btn_launch_phbot = QPushButton("🤖 تشغيل phBot")
+        btn_launch_seq   = QPushButton("⚡ تشغيل الكل")
+        btn_close_game   = QPushButton("🔴 إغلاق اللعبة")
+        btn_launch_game.setStyleSheet("background:#0D47A1;")
+        btn_launch_phbot.setStyleSheet("background:#1B5E20;")
+        btn_launch_seq.setStyleSheet("background:#4A148C; font-weight:bold;")
+        btn_close_game.setStyleSheet("background:#7B1FA2;")
+        btn_launch_game.clicked.connect(self._launch_game)
+        btn_launch_phbot.clicked.connect(self._launch_phbot)
+        btn_launch_seq.clicked.connect(self._launch_sequence)
+        btn_close_game.clicked.connect(self._close_game)
+        for w_ in [self.lbl_game_status, self.lbl_phbot_status,
+                   btn_launch_game, btn_launch_phbot, btn_launch_seq, btn_close_game]:
+            game_layout.addWidget(w_)
+        g_game.setLayout(game_layout)
+
+        g_ctrl = QGroupBox("🤖 تحكم البوت"); h = QHBoxLayout()
+        self.btn_start = QPushButton("▶️ تشغيل البوت")
+        self.btn_stop  = QPushButton("⏹️ إيقاف البوت")
         self.btn_test  = QPushButton("🧪 اختبار AI")
         self.btn_stop.setEnabled(False)
         for btn, color, fn in [
@@ -230,8 +330,11 @@ class MainWindow(QMainWindow):
         self.st["ai"].setText("⚪ متوقف")
         g_stats.setLayout(sg)
 
-        lay.addWidget(g_status); lay.addWidget(g_ctrl); lay.addWidget(g_stats)
+        lay.addWidget(g_status); lay.addWidget(g_game)
+        lay.addWidget(g_ctrl); lay.addWidget(g_stats)
         self._uptime_timer = QTimer(); self._uptime_timer.timeout.connect(self._tick_uptime)
+        self._game_check_timer = QTimer(); self._game_check_timer.timeout.connect(self._check_game_status)
+        self._game_check_timer.start(3000)
         return w
 
     # ─── Chat Tab ─────────────────────────────────────────────────────────
@@ -436,27 +539,90 @@ class MainWindow(QMainWindow):
     # ─── Config ───────────────────────────────────────────────────────────
     def _save_config(self):
         self.config = {
-            "deepseek_api_key": self.e_key.text().strip(),
-            "deepseek_model":   self.e_model.currentText(),
-            "server_name":      self.e_srv.text().strip(),
-            "server_ip":        self.e_ip.text().strip(),
-            "server_port":      self.e_port.value(),
-            "login_id":         self.e_uid.text().strip(),
-            "login_password":   self.e_pwd.text(),
-            "login_pincode":    self.e_pin.text(),
-            "char_name":        self.e_char.text().strip(),
-            "hp_threshold":     self.e_hp.value(),
-            "monster_threshold":self.e_mon.value(),
-            "spot_empty_minutes":self.e_spot.value(),
-            "farming_zone":     self.e_zone.text().strip(),
-            "auto_login":       self.chk_login.isChecked(),
-            "auto_quest":       self.chk_quest.isChecked(),
-            "auto_news":        self.chk_news.isChecked(),
+            "deepseek_api_key":    self.e_key.text().strip(),
+            "deepseek_model":      self.e_model.currentText(),
+            "server_name":         self.e_srv.text().strip(),
+            "server_ip":           self.e_ip.text().strip(),
+            "server_port":         self.e_port.value(),
+            "login_id":            self.e_uid.text().strip(),
+            "login_password":      self.e_pwd.text(),
+            "login_pincode":       self.e_pin.text(),
+            "char_name":           self.e_char.text().strip(),
+            "hp_threshold":        self.e_hp.value(),
+            "monster_threshold":   self.e_mon.value(),
+            "spot_empty_minutes":  self.e_spot.value(),
+            "farming_zone":        self.e_zone.text().strip(),
+            "auto_login":          self.chk_login.isChecked(),
+            "auto_quest":          self.chk_quest.isChecked(),
+            "auto_news":           self.chk_news.isChecked(),
+            # Game launcher fields
+            "game_exe_path":       self.e_game_exe.text().strip(),
+            "game_folder":         self.e_game_folder.text().strip(),
+            "phbot_exe_path":      self.e_phbot_exe.text().strip(),
+            "game_launch_args":    self.e_launch_args.text().strip(),
+            "game_startup_wait":   self.e_startup_wait.value(),
+            "auto_restart_game":   self.chk_auto_restart.isChecked(),
+            "launch_on_bot_start": self.chk_launch_on_start.isChecked(),
         }
         with open(CONFIG_FILE,"w",encoding="utf-8") as f:
             json.dump(self.config, f, ensure_ascii=False, indent=2)
         self._log("تم حفظ الإعدادات", "success")
         QMessageBox.information(self, "حفظ", "تم حفظ الإعدادات بنجاح!")
+
+    # ─── Browse Helpers ───────────────────────────────────────────────────
+    def _browse_exe(self, target_field: QLineEdit, title: str):
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"اختر {title}", "", "ملفات تنفيذية (*.exe);;كل الملفات (*)"
+        )
+        if path:
+            target_field.setText(path)
+            # تحديث مجلد اللعبة تلقائياً
+            if target_field is self.e_game_exe:
+                folder = os.path.dirname(path)
+                self.e_game_folder.setText(folder)
+                self._log(f"✅ تم تحديد ملف اللعبة: {path}", "success")
+            elif target_field is self.e_phbot_exe:
+                self._log(f"✅ تم تحديد phBot: {path}", "success")
+
+    def _browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(
+            self, "اختر مجلد اللعبة", self.e_game_folder.text() or "C:\\"
+        )
+        if folder:
+            self.e_game_folder.setText(folder)
+            self._log(f"📂 مجلد اللعبة: {folder}", "info")
+
+    def _auto_detect_game(self):
+        self._log("🔍 جاري الكشف التلقائي عن اللعبة...", "info")
+        def run():
+            launcher = GameLauncher(self.config, self._log)
+            path = launcher.auto_detect_game()
+            if path:
+                self.e_game_exe.setText(path)
+                self.e_game_folder.setText(os.path.dirname(path))
+            else:
+                self._log("لم يُعثر على اللعبة. حدّد المسار يدوياً.", "warning")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _scan_game_folder(self):
+        folder = self.e_game_folder.text().strip()
+        if not folder or not os.path.isdir(folder):
+            QMessageBox.warning(self, "تحذير", "حدّد مجلد اللعبة أولاً!"); return
+        self._log(f"🔎 فحص المجلد: {folder}", "info")
+        launcher = GameLauncher(self.config, self._log)
+        exes = launcher.scan_folder(folder)
+        if not exes:
+            self._log("لا توجد ملفات .exe في هذا المجلد", "warning"); return
+        lines = []
+        for e in exes[:12]:
+            tag = "🎮" if e["is_game"] else ("🤖" if e["is_phbot"] else "•")
+            lines.append(f"{tag} {e['name']} ({e['size_mb']} MB)")
+            if e["is_game"] and not self.e_game_exe.text():
+                self.e_game_exe.setText(e["path"])
+            if e["is_phbot"] and not self.e_phbot_exe.text():
+                self.e_phbot_exe.setText(e["path"])
+        self.exe_list_label.setText("ملفات موجودة: " + "  |  ".join(lines))
+        self._log(f"وُجد {len(exes)} ملف تنفيذي", "success")
 
     def _load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -466,11 +632,64 @@ class MainWindow(QMainWindow):
             except: pass
         return {}
 
+    # ─── Game Launcher Methods ────────────────────────────────────────────
+    def _get_launcher(self) -> GameLauncher:
+        if self._launcher is None:
+            self._launcher = GameLauncher(self.config, self._log)
+        else:
+            self._launcher.config = self.config
+        return self._launcher
+
+    def _launch_game(self):
+        self._save_config()
+        def run(): self._get_launcher().launch_game()
+        threading.Thread(target=run, daemon=True).start()
+
+    def _launch_phbot(self):
+        self._save_config()
+        def run(): self._get_launcher().launch_phbot()
+        threading.Thread(target=run, daemon=True).start()
+
+    def _launch_sequence(self):
+        self._save_config()
+        def run(): self._get_launcher().launch_sequence()
+        threading.Thread(target=run, daemon=True).start()
+
+    def _close_game(self):
+        launcher = self._get_launcher()
+        launcher.close_game()
+        launcher.close_phbot()
+
+    def _check_game_status(self):
+        try:
+            launcher = self._get_launcher()
+            status = launcher.get_process_status()
+            if status["game_running"]:
+                pid = status.get("game_pid", "")
+                self.lbl_game_status.setText(f"🟢 اللعبة: تعمل (PID:{pid})")
+                self.lbl_game_status.setStyleSheet("color:#00FF00; font-weight:bold;")
+            else:
+                self.lbl_game_status.setText("⚪ اللعبة: غير مشغّلة")
+                self.lbl_game_status.setStyleSheet("color:#AAAAAA; font-weight:bold;")
+            if status["phbot_running"]:
+                pid = status.get("phbot_pid", "")
+                self.lbl_phbot_status.setText(f"🟢 phBot: يعمل (PID:{pid})")
+                self.lbl_phbot_status.setStyleSheet("color:#00FF00; font-weight:bold;")
+            else:
+                self.lbl_phbot_status.setText("⚪ phBot: غير مشغّل")
+                self.lbl_phbot_status.setStyleSheet("color:#AAAAAA; font-weight:bold;")
+        except Exception:
+            pass
+
     # ─── Bot Control ──────────────────────────────────────────────────────
     def _start_bot(self):
         if not self.config.get("deepseek_api_key"):
             QMessageBox.warning(self, "تحذير", "يرجى إدخال مفتاح DeepSeek API أولاً!")
             return
+        # تشغيل اللعبة تلقائياً إذا كان الخيار مفعّلاً
+        if self.config.get("launch_on_bot_start") and self.config.get("game_exe_path"):
+            self._log("🚀 تشغيل اللعبة أولاً...", "info")
+            self._launch_sequence()
         self._log("جاري تشغيل البوت...", "info")
         self.bot_worker = BotWorker(self.config)
         self.bot_worker.log_signal.connect(self._log)

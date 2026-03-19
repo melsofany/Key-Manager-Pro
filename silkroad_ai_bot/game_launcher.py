@@ -10,8 +10,7 @@ import subprocess
 import threading
 
 # Windows-only creation flags
-_NO_WINDOW   = 0x08000000  # CREATE_NO_WINDOW  — يخفي نافذة CMD تماماً
-_DETACHED    = 0x00000008  # DETACHED_PROCESS  — العملية منفصلة (لتشغيل GUI)
+_NO_WINDOW = 0x08000000  # CREATE_NO_WINDOW — يخفي نافذة CMD عند استدعاء tasklist
 
 # المسارات الافتراضية الشائعة للعبة
 DEFAULT_PATHS = [
@@ -128,20 +127,50 @@ class GameLauncher:
         return sorted(found, key=lambda x: (not x["is_game"], not x["is_phbot"], x["name"]))
 
     # ─── تشغيل اللعبة ─────────────────────────────────────────────────────
-    def _popen_gui(self, cmd: list, cwd: str):
-        """تشغيل ملف EXE بدون CMD — يعمل فقط على Windows"""
-        flags = _DETACHED if sys.platform == "win32" else 0
-        return subprocess.Popen(
-            cmd,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=flags,
-        )
+    def _shell_launch(self, exe_path: str, args: str = "", cwd: str = "") -> bool:
+        """
+        تشغيل EXE عبر ShellExecuteW مع runas لرفع صلاحيات UAC تلقائياً.
+        يعمل حتى لو البرنامج يحتاج Admin. لا يُظهر نافذة CMD.
+        """
+        if sys.platform != "win32":
+            # Linux/Mac — تشغيل مباشر بدون elevation
+            subprocess.Popen(
+                [exe_path] + (args.split() if args else []),
+                cwd=cwd or os.path.dirname(exe_path),
+            )
+            return True
+
+        try:
+            import ctypes
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None,                              # hwnd
+                "runas",                           # verb  → يطلب UAC إذا لزم
+                exe_path,                          # مسار الملف
+                args if args else None,            # arguments
+                cwd or os.path.dirname(exe_path),  # مجلد العمل
+                1,                                 # SW_SHOWNORMAL
+            )
+            # ShellExecuteW تُعيد > 32 عند النجاح
+            if ret > 32:
+                return True
+            # أكواد الخطأ الشائعة
+            err_map = {
+                0:  "نفاد الذاكرة",
+                2:  "الملف غير موجود",
+                3:  "المجلد غير موجود",
+                5:  "تم رفض الوصول (Access Denied)",
+                8:  "ذاكرة غير كافية",
+                32: "الملف مُقفَل من برنامج آخر",
+            }
+            msg = err_map.get(ret, f"خطأ رقم {ret}")
+            self.log(f"❌ فشل ShellExecute: {msg}", "error")
+            return False
+        except Exception as e:
+            self.log(f"❌ خطأ في تشغيل اللعبة: {e}", "error")
+            return False
 
     def launch_game(self) -> bool:
-        """تشغيل عميل اللعبة بدون نافذة CMD"""
+        """تشغيل عميل اللعبة — يرفع UAC تلقائياً إن احتاج"""
         exe_path = self.config.get("game_exe_path", "")
         if not exe_path:
             self.log("❌ لم يتم تحديد مسار ملف اللعبة", "error")
@@ -154,27 +183,18 @@ class GameLauncher:
             self.log("⚠️ اللعبة تعمل بالفعل", "warning")
             return True
 
-        try:
-            folder = os.path.dirname(exe_path)
-            args   = self.config.get("game_launch_args", "").strip()
-            cmd    = [exe_path] + (args.split() if args else [])
-            self.game_process = self._popen_gui(cmd, folder)
-            self.log(
-                f"🚀 تم تشغيل اللعبة: {os.path.basename(exe_path)} "
-                f"(PID: {self.game_process.pid})",
-                "success"
-            )
+        args   = self.config.get("game_launch_args", "").strip()
+        folder = os.path.dirname(exe_path)
+        self.log(f"🚀 جاري تشغيل: {os.path.basename(exe_path)} ...", "info")
+
+        ok = self._shell_launch(exe_path, args, folder)
+        if ok:
+            self.log(f"✅ تم تشغيل اللعبة بنجاح", "success")
             self._start_monitor()
-            return True
-        except PermissionError:
-            self.log("❌ لا توجد صلاحيات كافية — شغّل البرنامج كمدير (Admin)", "error")
-            return False
-        except Exception as e:
-            self.log(f"❌ فشل تشغيل اللعبة: {e}", "error")
-            return False
+        return ok
 
     def launch_phbot(self) -> bool:
-        """تشغيل phBot بدون نافذة CMD"""
+        """تشغيل phBot — يرفع UAC تلقائياً إن احتاج"""
         phbot_path = self.config.get("phbot_exe_path", "")
         if not phbot_path:
             self.log("⚠️ لم يتم تحديد مسار phBot", "warning")
@@ -183,14 +203,11 @@ class GameLauncher:
             self.log(f"❌ phBot غير موجود: {phbot_path}", "error")
             return False
 
-        try:
-            folder = os.path.dirname(phbot_path)
-            self.phbot_process = self._popen_gui([phbot_path], folder)
-            self.log(f"🤖 تم تشغيل phBot (PID: {self.phbot_process.pid})", "success")
-            return True
-        except Exception as e:
-            self.log(f"❌ فشل تشغيل phBot: {e}", "error")
-            return False
+        self.log("🤖 جاري تشغيل phBot ...", "info")
+        ok = self._shell_launch(phbot_path, "", os.path.dirname(phbot_path))
+        if ok:
+            self.log("✅ تم تشغيل phBot بنجاح", "success")
+        return ok
 
     def launch_sequence(self) -> bool:
         """تشغيل متسلسل: اللعبة → phBot (إن وُجد) → الانتظار"""

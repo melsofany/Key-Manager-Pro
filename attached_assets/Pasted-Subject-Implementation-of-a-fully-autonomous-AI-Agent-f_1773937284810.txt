@@ -1,0 +1,53 @@
+Subject: Implementation of a fully autonomous AI Agent for Silkroad Online (Lv 116 Warrior).
+
+Role & Authority:
+You are an Expert MMORPG Automation Architect, specialising in client hooking, packet injection, and integrating Large Language Models (LLMs) via API for non-deterministic decision-making. You have exhaustive knowledge of Silkroad Online mechanics and the phBot API ecosystem.
+
+Objective:
+Design and write the full implementation for an "Autonomous AI Controller" to manage a Level 116 Warrior. The system must replace static IF/ELSE botting logic with dynamic, real-time decision-making powered by DeepSeek API.
+
+Architecture Overview (Hybrid System):
+
+The Client (Python Plugin inside phBot): Gathers telemetry, hooks game events, and executes dynamic commands relayed from Node.js.
+
+The Middleware (Node.js Express Server): Acts as the central hub. It receives telemetry from Python, formats the prompt for DeepSeek, and manages the API key communication.
+
+The Brain (DeepSeek API): Analyzes the current game state and outputs dynamic JSON command objects to be executed by the client.
+
+Required Features & Advanced Logic:
+
+I. Smart Login & Wait Bypass (Clientless Packet Injection)
+
+Implement an aggressive login mechanism.
+
+When disconnected (DC) or stuck in a full/VIP queue (like iSRO Theia or Legends private server), the agent must automatically switch to "Clientless Mode."
+
+It must utilize direct 0x7001 login packet injection through phBot to attempt login at maximum programmatic speed (spam login during full server scenarios).
+
+II. Dynamic Combat Rotation (Two-handed Sword)
+
+Primary Weapon: Two-handed Sword.
+
+Dynamic Skill Management: The agent must cast skills dynamically based on enemy status (knockdown, stun, giant vs. normal mob).
+
+Core Rotation: Daredevil, Ground Impact (Knockdown), Stab (Down attack), Turn Fresh (AoE).
+
+III. Adaptive Survival Logic (AI Weapon Switch)
+
+Trigger: If character HP drops below 45% OR surrounding monster count > 5 within 10m radius.
+
+Action: Immediately switch to "One-handed Sword & Shield," cast the "Iron Skin" buff (Lv13), and switch back to Two-handed Sword to continue combat.
+
+IV. Smart Spot Management & Questing
+
+Monitor farming area. If the spot is empty for > 2 mins or "Kill Stealing" (KS) is detected, generate new safe X/Y coordinates nearby to migrate.
+
+Monitor the Quest List. Automatically accept and turn in relevant Level 116-120 quests.
+
+Deliverables (Full Code Implementation):
+
+ai_core.py: Python plugin for phBot. Must include functions for telemetry gathering (get_hp(), get_monsters()), event hooks (DC handler, target change), weapon switching logic, and safe packet injection for login.
+
+server.js: Node.js server. Must set up an Express endpoint to receive JSON telemetry, manage communications with DeepSeek API, and enforce strict JSON responses from the LLM.
+
+system_prompt.txt: The system prompt to initialize DeepSeek, ensuring it understands the Lv116 Warrior's skill IDs, Silkroad mechanics, and must ONLY output JSON command objects.

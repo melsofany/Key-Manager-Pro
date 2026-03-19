@@ -1,22 +1,28 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Silkroad AI Controller API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: config
+    description: Bot configuration
+  - name: telemetry
+    description: Game telemetry
+  - name: command
+    description: AI command execution
+  - name: logs
+    description: Activity logs
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +30,140 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /config:
+    get:
+      operationId: getConfig
+      tags: [config]
+      summary: Get bot configuration
+      responses:
+        "200":
+          description: Config retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+    post:
+      operationId: saveConfig
+      tags: [config]
+      summary: Save bot configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotConfig"
+      responses:
+        "200":
+          description: Config saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /telemetry:
+    post:
+      operationId: receiveTelemetry
+      tags: [telemetry]
+      summary: Receive telemetry from Python plugin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelemetryData"
+      responses:
+        "200":
+          description: AI command response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICommand"
+
+  /telemetry/status:
+    get:
+      operationId: getTelemetryStatus
+      tags: [telemetry]
+      summary: Get latest telemetry status
+      responses:
+        "200":
+          description: Current telemetry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelemetryData"
+
+  /logs:
+    get:
+      operationId: getLogs
+      tags: [logs]
+      summary: Get activity logs
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: Logs list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LogEntry"
+    delete:
+      operationId: clearLogs
+      tags: [logs]
+      summary: Clear all logs
+      responses:
+        "200":
+          description: Logs cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /bot/start:
+    post:
+      operationId: startBot
+      tags: [command]
+      summary: Start the AI bot
+      responses:
+        "200":
+          description: Bot started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /bot/stop:
+    post:
+      operationId: stopBot
+      tags: [command]
+      summary: Stop the AI bot
+      responses:
+        "200":
+          description: Bot stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /bot/status:
+    get:
+      operationId: getBotStatus
+      tags: [command]
+      summary: Get bot running status
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +171,180 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required: [success, message]
+
+    BotConfig:
+      type: object
+      properties:
+        deepseekApiKey:
+          type: string
+        serverName:
+          type: string
+        characterName:
+          type: string
+        phbotHost:
+          type: string
+        phbotPort:
+          type: integer
+        farmingZone:
+          type: string
+        hpThreshold:
+          type: integer
+        monsterCountThreshold:
+          type: integer
+        autoLogin:
+          type: boolean
+        autoQuest:
+          type: boolean
+        loginId:
+          type: string
+        loginPassword:
+          type: string
+        loginPincode:
+          type: string
+      required:
+        - deepseekApiKey
+        - serverName
+        - characterName
+        - phbotHost
+        - phbotPort
+        - farmingZone
+        - hpThreshold
+        - monsterCountThreshold
+        - autoLogin
+        - autoQuest
+        - loginId
+        - loginPassword
+
+    TelemetryData:
+      type: object
+      properties:
+        characterName:
+          type: string
+        hp:
+          type: integer
+        maxHp:
+          type: integer
+        mp:
+          type: integer
+        maxMp:
+          type: integer
+        level:
+          type: integer
+        posX:
+          type: number
+        posY:
+          type: number
+        targetName:
+          type: string
+        targetHp:
+          type: integer
+        nearbyMonsters:
+          type: integer
+        isInCombat:
+          type: boolean
+        activeBuffs:
+          type: array
+          items:
+            type: string
+        currentWeapon:
+          type: string
+        isDead:
+          type: boolean
+        isDisconnected:
+          type: boolean
+        questList:
+          type: array
+          items:
+            type: string
+        spotEmptySeconds:
+          type: integer
+        ksDetected:
+          type: boolean
+      required:
+        - characterName
+        - hp
+        - maxHp
+        - mp
+        - maxMp
+        - level
+        - posX
+        - posY
+        - nearbyMonsters
+        - isInCombat
+        - activeBuffs
+        - currentWeapon
+        - isDead
+        - isDisconnected
+        - questList
+        - spotEmptySeconds
+        - ksDetected
+
+    AICommand:
+      type: object
+      properties:
+        action:
+          type: string
+          enum:
+            - cast_skill
+            - switch_weapon
+            - move_to
+            - use_potion
+            - accept_quest
+            - turn_in_quest
+            - login_inject
+            - idle
+            - defend
+        skillId:
+          type: integer
+        targetX:
+          type: number
+        targetY:
+          type: number
+        weaponSlot:
+          type: integer
+        reason:
+          type: string
+        priority:
+          type: integer
+      required: [action, reason, priority]
+
+    BotStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        connectedToPhbot:
+          type: boolean
+        lastTelemetryAt:
+          type: string
+        totalCommands:
+          type: integer
+        uptime:
+          type: integer
+      required: [running, connectedToPhbot, totalCommands, uptime]
+
+    LogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        timestamp:
+          type: string
+        level:
+          type: string
+          enum: [info, warning, error, success, ai]
+        message:
+          type: string
+        details:
+          type: string
+      required: [id, timestamp, level, message]

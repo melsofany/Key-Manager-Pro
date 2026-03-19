@@ -638,22 +638,39 @@ class MainWindow(QMainWindow):
 
     # ─── RTL-safe dialogs ─────────────────────────────────────────────────
     def _msg_box(self, title: str, text: str, kind: str = "info") -> int:
-        """يعرض نافذة رسالة آمنة مع RTL (يمنع مشكلة عدم عمل الأزرار)"""
-        dlg = QMessageBox(self)
-        dlg.setLayoutDirection(Qt.LeftToRight)   # الإصلاح الأساسي
-        dlg.setWindowTitle(title)
-        dlg.setText(text)
-        icon_map = {
-            "info":     QMessageBox.Information,
-            "warning":  QMessageBox.Warning,
-            "error":    QMessageBox.Critical,
-            "question": QMessageBox.Question,
-        }
-        dlg.setIcon(icon_map.get(kind, QMessageBox.Information))
-        if kind == "question":
-            dlg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            dlg.setDefaultButton(QMessageBox.No)
-        return dlg.exec_()
+        """
+        يعرض نافذة رسالة آمنة.
+        الإصلاح الكامل لمشكلة RTL: نحوّل اتجاه التطبيق كله إلى LTR
+        قبل فتح النافذة ثم نُعيده بعدها — هذا يمنع تجميد الأزرار.
+        """
+        app = QApplication.instance()
+
+        # ① حفظ الاتجاه الحالي والتحويل إلى LTR
+        prev_direction = app.layoutDirection()
+        app.setLayoutDirection(Qt.LeftToRight)
+
+        try:
+            dlg = QMessageBox()          # بدون parent لتجنب وراثة RTL
+            dlg.setLayoutDirection(Qt.LeftToRight)
+            dlg.setWindowTitle(title)
+            dlg.setText(text)
+            dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
+            icon_map = {
+                "info":     QMessageBox.Information,
+                "warning":  QMessageBox.Warning,
+                "error":    QMessageBox.Critical,
+                "question": QMessageBox.Question,
+            }
+            dlg.setIcon(icon_map.get(kind, QMessageBox.Information))
+            if kind == "question":
+                dlg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                dlg.setDefaultButton(QMessageBox.No)
+            result = dlg.exec_()
+        finally:
+            # ② استعادة الاتجاه الأصلي (RTL) للواجهة الرئيسية
+            app.setLayoutDirection(prev_direction)
+
+        return result
 
     # ─── Config ───────────────────────────────────────────────────────────
     def _collect_config(self) -> dict:
@@ -736,9 +753,13 @@ class MainWindow(QMainWindow):
 
     # ─── Browse Helpers ───────────────────────────────────────────────────
     def _browse_exe(self, target_field: QLineEdit, title: str):
+        app = QApplication.instance()
+        prev = app.layoutDirection()
+        app.setLayoutDirection(Qt.LeftToRight)
         path, _ = QFileDialog.getOpenFileName(
-            self, f"اختر {title}", "", "ملفات تنفيذية (*.exe);;كل الملفات (*)"
+            None, f"اختر {title}", "", "ملفات تنفيذية (*.exe);;كل الملفات (*)"
         )
+        app.setLayoutDirection(prev)
         if path:
             target_field.setText(path)
             # تحديث مجلد اللعبة تلقائياً
@@ -750,9 +771,13 @@ class MainWindow(QMainWindow):
                 self._log(f"✅ تم تحديد phBot: {path}", "success")
 
     def _browse_folder(self):
+        app = QApplication.instance()
+        prev = app.layoutDirection()
+        app.setLayoutDirection(Qt.LeftToRight)
         folder = QFileDialog.getExistingDirectory(
-            self, "اختر مجلد اللعبة", self.e_game_folder.text() or "C:\\"
+            None, "اختر مجلد اللعبة", self.e_game_folder.text() or "C:\\"
         )
+        app.setLayoutDirection(prev)
         if folder:
             self.e_game_folder.setText(folder)
             self._log(f"📂 مجلد اللعبة: {folder}", "info")

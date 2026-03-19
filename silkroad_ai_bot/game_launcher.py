@@ -9,6 +9,10 @@ import time
 import subprocess
 import threading
 
+# Windows-only creation flags
+_NO_WINDOW   = 0x08000000  # CREATE_NO_WINDOW  — يخفي نافذة CMD تماماً
+_DETACHED    = 0x00000008  # DETACHED_PROCESS  — العملية منفصلة (لتشغيل GUI)
+
 # المسارات الافتراضية الشائعة للعبة
 DEFAULT_PATHS = [
     r"C:\Silkroad",
@@ -53,7 +57,6 @@ class GameLauncher:
     # ─── كشف تلقائي ───────────────────────────────────────────────────────
     def auto_detect_game(self) -> str:
         """محاولة الكشف التلقائي عن مسار اللعبة"""
-        # 1. فحص المسارات الافتراضية
         for path in DEFAULT_PATHS:
             if os.path.isdir(path):
                 for exe in COMMON_EXECUTABLES:
@@ -62,13 +65,11 @@ class GameLauncher:
                         self.log(f"✅ تم اكتشاف اللعبة: {full}", "success")
                         return full
 
-        # 2. محاولة البحث في السجل (Windows Registry)
         if sys.platform == "win32":
             registry_result = self._search_registry()
             if registry_result:
                 return registry_result
 
-        # 3. فحص المسار الحالي
         current_dir = os.getcwd()
         for exe in COMMON_EXECUTABLES:
             full = os.path.join(current_dir, exe)
@@ -119,7 +120,7 @@ class GameLauncher:
                         "name": f,
                         "path": full,
                         "size_mb": round(size_mb, 1),
-                        "is_game": any(f.lower() == e.lower() for e in COMMON_EXECUTABLES),
+                        "is_game":  any(f.lower() == e.lower() for e in COMMON_EXECUTABLES),
                         "is_phbot": any(f.lower() == e.lower() for e in PHBOT_EXECUTABLES),
                     })
         except PermissionError:
@@ -127,8 +128,20 @@ class GameLauncher:
         return sorted(found, key=lambda x: (not x["is_game"], not x["is_phbot"], x["name"]))
 
     # ─── تشغيل اللعبة ─────────────────────────────────────────────────────
+    def _popen_gui(self, cmd: list, cwd: str):
+        """تشغيل ملف EXE بدون CMD — يعمل فقط على Windows"""
+        flags = _DETACHED if sys.platform == "win32" else 0
+        return subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+
     def launch_game(self) -> bool:
-        """تشغيل عميل اللعبة"""
+        """تشغيل عميل اللعبة بدون نافذة CMD"""
         exe_path = self.config.get("game_exe_path", "")
         if not exe_path:
             self.log("❌ لم يتم تحديد مسار ملف اللعبة", "error")
@@ -137,32 +150,31 @@ class GameLauncher:
             self.log(f"❌ الملف غير موجود: {exe_path}", "error")
             return False
 
-        # التحقق من أن اللعبة ليست مشغّلة مسبقاً
         if self.is_game_running():
             self.log("⚠️ اللعبة تعمل بالفعل", "warning")
             return True
 
         try:
             folder = os.path.dirname(exe_path)
-            args = self.config.get("game_launch_args", "").strip()
-            cmd = [exe_path] + (args.split() if args else [])
-            self.game_process = subprocess.Popen(
-                cmd,
-                cwd=folder,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+            args   = self.config.get("game_launch_args", "").strip()
+            cmd    = [exe_path] + (args.split() if args else [])
+            self.game_process = self._popen_gui(cmd, folder)
+            self.log(
+                f"🚀 تم تشغيل اللعبة: {os.path.basename(exe_path)} "
+                f"(PID: {self.game_process.pid})",
+                "success"
             )
-            self.log(f"🚀 تم تشغيل اللعبة: {os.path.basename(exe_path)} (PID: {self.game_process.pid})", "success")
             self._start_monitor()
             return True
         except PermissionError:
-            self.log("❌ لا توجد صلاحيات كافية. شغّل البرنامج كمدير (Admin)", "error")
+            self.log("❌ لا توجد صلاحيات كافية — شغّل البرنامج كمدير (Admin)", "error")
             return False
         except Exception as e:
             self.log(f"❌ فشل تشغيل اللعبة: {e}", "error")
             return False
 
     def launch_phbot(self) -> bool:
-        """تشغيل phBot"""
+        """تشغيل phBot بدون نافذة CMD"""
         phbot_path = self.config.get("phbot_exe_path", "")
         if not phbot_path:
             self.log("⚠️ لم يتم تحديد مسار phBot", "warning")
@@ -173,11 +185,7 @@ class GameLauncher:
 
         try:
             folder = os.path.dirname(phbot_path)
-            self.phbot_process = subprocess.Popen(
-                [phbot_path],
-                cwd=folder,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
-            )
+            self.phbot_process = self._popen_gui([phbot_path], folder)
             self.log(f"🤖 تم تشغيل phBot (PID: {self.phbot_process.pid})", "success")
             return True
         except Exception as e:
@@ -187,16 +195,13 @@ class GameLauncher:
     def launch_sequence(self) -> bool:
         """تشغيل متسلسل: اللعبة → phBot (إن وُجد) → الانتظار"""
         self.log("🔄 بدء تسلسل تشغيل اللعبة...", "info")
-        success = self.launch_game()
-        if not success:
+        if not self.launch_game():
             return False
 
-        # انتظر حتى تُفتح نافذة اللعبة
         wait_secs = self.config.get("game_startup_wait", 8)
         self.log(f"⏳ انتظار {wait_secs} ثانية لتحميل اللعبة...", "info")
         time.sleep(wait_secs)
 
-        # تشغيل phBot إن كان محدداً
         if self.config.get("use_phbot") and self.config.get("phbot_exe_path"):
             self.launch_phbot()
             time.sleep(3)
@@ -232,11 +237,10 @@ class GameLauncher:
 
     # ─── مراقبة العملية ───────────────────────────────────────────────────
     def is_game_running(self) -> bool:
-        """التحقق من أن اللعبة تعمل حالياً"""
+        """التحقق من أن اللعبة تعمل — بدون فتح CMD"""
         if self.game_process:
             return self.game_process.poll() is None
 
-        # فحص اسم الملف في العمليات النشطة
         exe_path = self.config.get("game_exe_path", "")
         if not exe_path:
             return False
@@ -252,13 +256,26 @@ class GameLauncher:
         return self._find_process_by_name(os.path.basename(phbot_path).lower())
 
     def _find_process_by_name(self, exe_name: str) -> bool:
-        """البحث عن عملية بالاسم (Windows)"""
+        """البحث عن عملية بالاسم بدون فتح نافذة CMD"""
         if sys.platform != "win32":
             return False
+        # أولاً: حاول psutil (أسرع وأنظف)
+        try:
+            import psutil
+            for p in psutil.process_iter(["name"]):
+                if p.info["name"] and p.info["name"].lower() == exe_name:
+                    return True
+            return False
+        except ImportError:
+            pass
+        # ثانياً: tasklist مع CREATE_NO_WINDOW
         try:
             result = subprocess.run(
                 ["tasklist", "/FI", f"IMAGENAME eq {exe_name}", "/NH"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=_NO_WINDOW,
             )
             return exe_name.lower() in result.stdout.lower()
         except Exception:
@@ -266,9 +283,9 @@ class GameLauncher:
 
     def get_process_status(self) -> dict:
         return {
-            "game_running":   self.is_game_running(),
-            "phbot_running":  self.is_phbot_running(),
-            "game_pid": self.game_process.pid if self.game_process and self.game_process.poll() is None else None,
+            "game_running":  self.is_game_running(),
+            "phbot_running": self.is_phbot_running(),
+            "game_pid":  self.game_process.pid  if self.game_process  and self.game_process.poll()  is None else None,
             "phbot_pid": self.phbot_process.pid if self.phbot_process and self.phbot_process.poll() is None else None,
         }
 

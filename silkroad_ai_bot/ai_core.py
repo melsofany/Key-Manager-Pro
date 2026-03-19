@@ -124,8 +124,10 @@ class PacketInjector:
         pkt = struct.pack("<HH", size, ptype) + data
         return pkt + struct.pack("B", sum(pkt) & 0xFF)
 
-    def spam_login(self, username, password, pincode="", attempts=8, delay=0.4):
-        self.log(f"بدء محاولات الدخول ({attempts} محاولة)...", "warning")
+    def spam_login(self, username, password, pincode="",
+                   attempts=8, delay=0.4, shard_id=0):
+        shard_txt = f" → Shard {shard_id}" if shard_id else ""
+        self.log(f"بدء محاولات الدخول{shard_txt} ({attempts} محاولة)...", "warning")
         for i in range(attempts):
             if not self.connected:
                 if not self.connect():
@@ -137,8 +139,11 @@ class PacketInjector:
                 if pincode:
                     pin = pincode.encode("ascii") + b"\x00"
                     data += struct.pack("<H", len(pin)) + pin
+                # إضافة Shard ID لاختيار السيرفر داخل اللعبة
+                if shard_id:
+                    data += struct.pack("<H", shard_id)
                 self.sock.sendall(self._build(PACKET_LOGIN, data))
-                self.log(f"محاولة دخول {i+1}/{attempts}", "info")
+                self.log(f"محاولة دخول {i+1}/{attempts}{shard_txt}", "info")
             except Exception as e:
                 self.log(f"خطأ في الإرسال: {e}", "error")
                 self.connected = False
@@ -259,6 +264,7 @@ class SilkroadAICore:
                         self.config.get("login_id", ""),
                         self.config.get("login_password", ""),
                         self.config.get("login_pincode", ""),
+                        shard_id=self.config.get("shard_id", 0),
                     )
                 time.sleep(5)
             else:
@@ -421,6 +427,7 @@ class SilkroadAICore:
                     self.config.get("login_password", ""),
                     self.config.get("login_pincode", ""),
                 ),
+                kwargs={"shard_id": self.config.get("shard_id", 0)},
                 daemon=True
             ).start()
             return "success"

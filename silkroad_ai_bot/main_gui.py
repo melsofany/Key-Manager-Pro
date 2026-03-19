@@ -29,17 +29,37 @@ CONFIG_FILE = "bot_config.json"
 
 # قائمة السيرفرات المعروفة
 KNOWN_SERVERS = {
-    "— اختر سيرفر —":           ("", 15779),
-    "iSRO Official":              ("gw.silkroadonline.net", 15779),
-    "vSRO Official":              ("vSRO.silkroadonline.net", 15779),
-    "SRO-R Official":             ("sro-r.com", 15779),
-    "Silkroad R (EU)":            ("eu.silkroadonline.net", 15779),
-    "Silkroad R (US)":            ("us.silkroadonline.net", 15779),
-    "Arabia SRO (خاص)":          ("silkroadarabia.net", 15779),
-    "SRO Legend (خاص)":          ("srolegend.net", 15779),
-    "Silkroad Evo (خاص)":        ("silkroadevo.com", 15779),
-    "Local / Localhost":          ("127.0.0.1", 15779),
-    "Custom (يدوي)":             ("", 15779),
+    "— اختر سيرفر —":                  ("",                        15779),
+    # ── iSRO Official Shards ──────────────────────────────────────────────
+    "iSRO — Pontus   (EU) 🇪🇺":        ("gw.silkroadonline.net",   15779),
+    "iSRO — Hebe     (EU) 🇪🇺":        ("gw.silkroadonline.net",   15779),
+    "iSRO — Brontes  (EU) 🇪🇺":        ("gw.silkroadonline.net",   15779),
+    "iSRO — Thanatus (EU) 🇪🇺":        ("gw.silkroadonline.net",   15779),
+    "iSRO — Theia    (US) 🇺🇸":        ("gw.silkroadonline.net",   15779),
+    "iSRO — Hyperion (US) 🇺🇸":        ("gw.silkroadonline.net",   15779),
+    "iSRO Gateway (عام)":              ("gw.silkroadonline.net",   15779),
+    # ── SRO-R / vSRO ─────────────────────────────────────────────────────
+    "vSRO Official":                   ("vSRO.silkroadonline.net", 15779),
+    "SRO-R Official":                  ("sro-r.com",               15779),
+    "Silkroad R (EU)":                 ("eu.silkroadonline.net",   15779),
+    "Silkroad R (US)":                 ("us.silkroadonline.net",   15779),
+    # ── خواص ─────────────────────────────────────────────────────────────
+    "Arabia SRO (خاص)":               ("silkroadarabia.net",      15779),
+    "SRO Legend (خاص)":               ("srolegend.net",           15779),
+    "Silkroad Evo (خاص)":             ("silkroadevo.com",         15779),
+    # ── أخرى ─────────────────────────────────────────────────────────────
+    "Local / Localhost":               ("127.0.0.1",               15779),
+    "Custom (يدوي)":                  ("",                        15779),
+}
+
+# ربط اسم الـ Shard بالـ Shard ID المُرسَل في حزمة الاتصال
+SHARD_IDS = {
+    "iSRO — Pontus   (EU) 🇪🇺": 1,
+    "iSRO — Hebe     (EU) 🇪🇺": 2,
+    "iSRO — Brontes  (EU) 🇪🇺": 3,
+    "iSRO — Thanatus (EU) 🇪🇺": 4,
+    "iSRO — Theia    (US) 🇺🇸": 5,
+    "iSRO — Hyperion (US) 🇺🇸": 6,
 }
 
 
@@ -184,20 +204,35 @@ class MainWindow(QMainWindow):
         self.e_pin.setPlaceholderText("اختياري")
         self.e_char = QLineEdit(self.config.get("char_name",""))
 
-        # Auto-fill IP/Port when server selected
+        # Auto-fill IP/Port and show shard info when server selected
         def _on_server_changed(name):
             ip, port = KNOWN_SERVERS.get(name, ("", 15779))
             if ip:
                 self.e_ip.setText(ip)
                 self.e_port.setValue(port)
+            shard_id = SHARD_IDS.get(name, 0)
+            if shard_id:
+                self._shard_info_lbl.setText(
+                    f"Shard ID: {shard_id}  |  Gateway: {ip}:{port}"
+                )
+            elif ip:
+                self._shard_info_lbl.setText(f"Gateway: {ip}:{port}")
+            else:
+                self._shard_info_lbl.setText("")
         self.e_srv.currentTextChanged.connect(_on_server_changed)
 
-        for lbl, w_ in [("السيرفر:", self.e_srv), ("IP:", self.e_ip),
-                        ("البورت:", self.e_port), ("المستخدم:", self.e_uid),
-                        ("كلمة المرور:", self.e_pwd), ("PIN:", self.e_pin),
-                        ("اسم الشخصية:", self.e_char)]:
+        self._shard_info_lbl = QLabel("")
+        self._shard_info_lbl.setStyleSheet("color:#FFD700; font-size:10px; font-style:italic;")
+
+        for lbl, w_ in [("السيرفر:", self.e_srv), ("", self._shard_info_lbl),
+                        ("IP:", self.e_ip), ("البورت:", self.e_port),
+                        ("المستخدم:", self.e_uid), ("كلمة المرور:", self.e_pwd),
+                        ("PIN:", self.e_pin), ("اسم الشخصية:", self.e_char)]:
             f2.addRow(lbl, w_)
         g2.setLayout(f2)
+
+        # trigger once to fill shard info for saved server
+        _on_server_changed(self.e_srv.currentText())
 
         # Combat
         g3 = QGroupBox("⚔️ القتال"); f3 = QFormLayout()
@@ -629,6 +664,7 @@ class MainWindow(QMainWindow):
             "server_name":         self.e_srv.currentText(),
             "server_ip":           self.e_ip.text().strip(),
             "server_port":         self.e_port.value(),
+            "shard_id":            SHARD_IDS.get(self.e_srv.currentText(), 0),
             "login_id":            self.e_uid.text().strip(),
             "login_password":      self.e_pwd.text(),
             "login_pincode":       self.e_pin.text(),

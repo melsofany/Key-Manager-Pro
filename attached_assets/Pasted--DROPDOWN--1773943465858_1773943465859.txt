@@ -1,0 +1,80 @@
+الازرار لا تعمل اغلبها وخصوصا في النوافذ المنبثقه بالاضافه اللي ان السرفرات يجب ان تكون من DROPDOWN واللعبه لا تبداء عند حفظ الاعدادات
+
+سأحل المشاكل الثلاث كلها دفعة واحدة:
+
+النوافذ المنبثقة — السبب هو اتجاه RTL يُعطّل أزرار QMessageBox
+السيرفرات — تحويل إلى قائمة منسدلة مع ملء تلقائي للـ IP
+تشغيل اللعبة — ربطها بزر البدء بشكل صحيح
+Now I have a clear picture. Let me plan all the fixes:
+
+Fix popup buttons (QMessageBox RTL issue) - Add a helper _msg_box method that creates dialogs with Qt.LeftToRight direction, and replace all QMessageBox.information/warning/question calls with this helper.
+
+Server dropdown - Replace self.e_srv = QLineEdit(...) with a QComboBox containing known SRO servers, auto-fill IP when selected.
+
+Fix _save_config to read self.e_srv.currentText() instead of self.e_srv.text().
+
+Game launch - The _launch_game method triggers _save_config() which shows a dialog every time, so I need a silent variant. The auto-launch feature might not be working because the dialog blocks the sequence, so I'll create _save_config_silent() to handle this without user interruption.
+
+Now I'm going through the codebase to audit all QMessageBox calls and swap them for the RTL-safe version to ensure consistent behavior across the interface.
+
+سأحل كل المشاكل الثلاث:
+
+Good. Now I have a complete picture. Let me now create the comprehensive fix for the entire main_gui.py file. The key changes needed are:
+
+Add _msg_box helper - RTL-safe dialog helper that sets Qt.LeftToRight on all dialogs
+
+Replace all QMessageBox calls with self._msg_box()
+
+Replace e_srv QLineEdit with ComboBox - with known SRO servers and auto-fill IP
+
+Fix _save_config to use self.e_srv.currentText() and not pop a dialog in certain cases
+
+Add _save_config_silent() for internal saves without user dialogs during launch/start operations
+
+Fix game launch - Use the silent save method from launch buttons instead of triggering the dialog version
+
+Now I'll apply these fixes systematically.
+
+For the server dropdown, I'm setting up a list of common Silkroad servers with their addresses and ports, starting with a placeholder option and including the official iSRO and vSRO servers, while allowing users to enter custom servers as well.
+
+Setting up server list... I see the issue now—the server dropdown should automatically populate the IP field when a selection is made. So I need to replace the server name text field with a combo box, connect it to update the IP field, and then refactor the message box calls and config saving to use helper methods that work silently for the game launch buttons.
+
+الآن سأُصلح كل المشاكل بشكل منهجي:
+
+Now let me replace the server field with a ComboBox, and update the related code. I need to:
+
+Replace self.e_srv = QLineEdit(...) with self.e_srv = QComboBox()
+Connect it to auto-fill the IP field
+Update _save_config to use currentText()
+Add _msg_box helper
+Fix all QMessageBox calls
+Add _save_config_silent()
+Fix launch buttons
+Let me do these in order.
+
+الآن استبدل حقل السيرفر بقائمة منسدلة مع ملء تلقائي للـ IP:
+
+Good. Now I need to:1. Fix _save_config to use self.e_srv.currentText() instead of self.e_srv.text()
+2. Add _msg_box helper that creates RTL-safe dialogs3. Add _save_config_silent() version4. Replace all QMessageBox.information/warning with self._msg_box()5. Fix game launch buttons to use _save_config_silent()Let me make these changes.
+
+الآن أُصلح _save_config وأضيف مربعات الحوار الآمنة مع RTL:
+
+Good progress. Now I need to:
+
+Fix game launch buttons to use _save_config_silent() instead of _save_config()
+Replace all remaining QMessageBox.warning/information calls with self._msg_box()
+Fix _start_bot to not require _launch_sequence to be blocking
+Let me find and replace all remaining QMessageBox calls.
+
+الآن استبدل جميع QMessageBox المتبقية بالنسخة الآمنة وأصلح أزرار التشغيل:
+
+Now I need to fix all the QMessageBox calls outside of the _msg_box helper method. Let me replace them one by one.
+
+Good. Now let me fix the remaining QMessageBox calls - the ones in _start_bot and _test_ai, and the _clear_memory one.
+
+Now let me fix the remaining QMessageBox calls:1. Line 752: QMessageBox.warning in _start_bot2. Line 785: QMessageBox.warning in _test_ai3. Lines 954-956: QMessageBox.question in _clear_memory
+
+Also, I need to fix the game launch buttons to use _save_config_silent() instead of _save_config(), and fix the _start_bot to handle the game launch more cleanly.
+
+الآن أُصلح جميع النوافذ المنبثقة المتبقية وأزرار تشغيل اللعبة:
+

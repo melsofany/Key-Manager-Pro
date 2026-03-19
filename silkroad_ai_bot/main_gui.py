@@ -706,17 +706,17 @@ class MainWindow(QMainWindow):
         return self._launcher
 
     def _launch_game(self):
-        self._save_config()
+        self._save_config_silent()
         def run(): self._get_launcher().launch_game()
         threading.Thread(target=run, daemon=True).start()
 
     def _launch_phbot(self):
-        self._save_config()
+        self._save_config_silent()
         def run(): self._get_launcher().launch_phbot()
         threading.Thread(target=run, daemon=True).start()
 
     def _launch_sequence(self):
-        self._save_config()
+        self._save_config_silent()
         def run(): self._get_launcher().launch_sequence()
         threading.Thread(target=run, daemon=True).start()
 
@@ -952,8 +952,7 @@ class MainWindow(QMainWindow):
         self.skills_text.setPlainText("\n".join(skill_lines) or "لا توجد بيانات مهارات بعد")
 
     def _clear_memory(self):
-        r = QMessageBox.question(self, "تأكيد", "هل تريد مسح الذاكرة المحفوظة؟",
-                                  QMessageBox.Yes | QMessageBox.No)
+        r = self._msg_box("تأكيد", "هل تريد مسح الذاكرة المحفوظة؟", "question")
         if r == QMessageBox.Yes:
             import os
             for f in ["bot_memory.json", "news_cache.json"]:

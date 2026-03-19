@@ -25,6 +25,21 @@ from game_launcher import GameLauncher
 
 CONFIG_FILE = "bot_config.json"
 
+# قائمة السيرفرات المعروفة
+KNOWN_SERVERS = {
+    "— اختر سيرفر —":           ("", 15779),
+    "iSRO Official":              ("gw.silkroadonline.net", 15779),
+    "vSRO Official":              ("vSRO.silkroadonline.net", 15779),
+    "SRO-R Official":             ("sro-r.com", 15779),
+    "Silkroad R (EU)":            ("eu.silkroadonline.net", 15779),
+    "Silkroad R (US)":            ("us.silkroadonline.net", 15779),
+    "Arabia SRO (خاص)":          ("silkroadarabia.net", 15779),
+    "SRO Legend (خاص)":          ("srolegend.net", 15779),
+    "Silkroad Evo (خاص)":        ("silkroadevo.com", 15779),
+    "Local / Localhost":          ("127.0.0.1", 15779),
+    "Custom (يدوي)":             ("", 15779),
+}
+
 
 class BotWorker(QThread):
     log_signal = pyqtSignal(str, str)
@@ -134,8 +149,19 @@ class MainWindow(QMainWindow):
 
         # Login
         g2 = QGroupBox("🎮 بيانات الدخول"); f2 = QFormLayout()
-        self.e_srv  = QLineEdit(self.config.get("server_name",""))
+
+        # Server dropdown
+        self.e_srv = QComboBox()
+        self.e_srv.setLayoutDirection(Qt.LeftToRight)
+        self.e_srv.addItems(list(KNOWN_SERVERS.keys()))
+        saved_srv = self.config.get("server_name", "— اختر سيرفر —")
+        if saved_srv in KNOWN_SERVERS:
+            self.e_srv.setCurrentText(saved_srv)
+        else:
+            self.e_srv.setCurrentText("Custom (يدوي)")
+
         self.e_ip   = QLineEdit(self.config.get("server_ip",""))
+        self.e_ip.setPlaceholderText("0.0.0.0 أو domain.com")
         self.e_port = QSpinBox(); self.e_port.setRange(1,65535)
         self.e_port.setValue(self.config.get("server_port",15779))
         self.e_uid  = QLineEdit(self.config.get("login_id",""))
@@ -145,10 +171,19 @@ class MainWindow(QMainWindow):
         self.e_pin.setEchoMode(QLineEdit.Password)
         self.e_pin.setPlaceholderText("اختياري")
         self.e_char = QLineEdit(self.config.get("char_name",""))
-        for lbl, w_ in [("السيرفر:",self.e_srv),("IP:",self.e_ip),
-                        ("البورت:",self.e_port),("المستخدم:",self.e_uid),
-                        ("كلمة المرور:",self.e_pwd),("PIN:",self.e_pin),
-                        ("اسم الشخصية:",self.e_char)]:
+
+        # Auto-fill IP/Port when server selected
+        def _on_server_changed(name):
+            ip, port = KNOWN_SERVERS.get(name, ("", 15779))
+            if ip:
+                self.e_ip.setText(ip)
+                self.e_port.setValue(port)
+        self.e_srv.currentTextChanged.connect(_on_server_changed)
+
+        for lbl, w_ in [("السيرفر:", self.e_srv), ("IP:", self.e_ip),
+                        ("البورت:", self.e_port), ("المستخدم:", self.e_uid),
+                        ("كلمة المرور:", self.e_pwd), ("PIN:", self.e_pin),
+                        ("اسم الشخصية:", self.e_char)]:
             f2.addRow(lbl, w_)
         g2.setLayout(f2)
 
@@ -536,12 +571,32 @@ class MainWindow(QMainWindow):
             f.write(self.log_area.toPlainText())
         self._log(f"تم الحفظ: {fname}", "success")
 
+    # ─── RTL-safe dialogs ─────────────────────────────────────────────────
+    def _msg_box(self, title: str, text: str, kind: str = "info") -> int:
+        """يعرض نافذة رسالة آمنة مع RTL (يمنع مشكلة عدم عمل الأزرار)"""
+        dlg = QMessageBox(self)
+        dlg.setLayoutDirection(Qt.LeftToRight)   # الإصلاح الأساسي
+        dlg.setWindowTitle(title)
+        dlg.setText(text)
+        icon_map = {
+            "info":     QMessageBox.Information,
+            "warning":  QMessageBox.Warning,
+            "error":    QMessageBox.Critical,
+            "question": QMessageBox.Question,
+        }
+        dlg.setIcon(icon_map.get(kind, QMessageBox.Information))
+        if kind == "question":
+            dlg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            dlg.setDefaultButton(QMessageBox.No)
+        return dlg.exec_()
+
     # ─── Config ───────────────────────────────────────────────────────────
-    def _save_config(self):
-        self.config = {
+    def _collect_config(self) -> dict:
+        """تجميع قيم الإعدادات من الواجهة"""
+        return {
             "deepseek_api_key":    self.e_key.text().strip(),
             "deepseek_model":      self.e_model.currentText(),
-            "server_name":         self.e_srv.text().strip(),
+            "server_name":         self.e_srv.currentText(),
             "server_ip":           self.e_ip.text().strip(),
             "server_port":         self.e_port.value(),
             "login_id":            self.e_uid.text().strip(),
@@ -555,7 +610,6 @@ class MainWindow(QMainWindow):
             "auto_login":          self.chk_login.isChecked(),
             "auto_quest":          self.chk_quest.isChecked(),
             "auto_news":           self.chk_news.isChecked(),
-            # Game launcher fields
             "game_exe_path":       self.e_game_exe.text().strip(),
             "game_folder":         self.e_game_folder.text().strip(),
             "phbot_exe_path":      self.e_phbot_exe.text().strip(),
@@ -564,10 +618,21 @@ class MainWindow(QMainWindow):
             "auto_restart_game":   self.chk_auto_restart.isChecked(),
             "launch_on_bot_start": self.chk_launch_on_start.isChecked(),
         }
-        with open(CONFIG_FILE,"w",encoding="utf-8") as f:
-            json.dump(self.config, f, ensure_ascii=False, indent=2)
-        self._log("تم حفظ الإعدادات", "success")
-        QMessageBox.information(self, "حفظ", "تم حفظ الإعدادات بنجاح!")
+
+    def _save_config_silent(self):
+        """حفظ بدون نافذة تأكيد — للاستخدام الداخلي"""
+        self.config = self._collect_config()
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            self._log("✔ تم حفظ الإعدادات", "success")
+        except Exception as e:
+            self._log(f"خطأ في الحفظ: {e}", "error")
+
+    def _save_config(self):
+        """حفظ مع نافذة تأكيد — لزر الحفظ اليدوي"""
+        self._save_config_silent()
+        self._msg_box("حفظ", "✔ تم حفظ الإعدادات بنجاح!", "info")
 
     # ─── Browse Helpers ───────────────────────────────────────────────────
     def _browse_exe(self, target_field: QLineEdit, title: str):
@@ -607,7 +672,7 @@ class MainWindow(QMainWindow):
     def _scan_game_folder(self):
         folder = self.e_game_folder.text().strip()
         if not folder or not os.path.isdir(folder):
-            QMessageBox.warning(self, "تحذير", "حدّد مجلد اللعبة أولاً!"); return
+            self._msg_box("تحذير", "حدّد مجلد اللعبة أولاً!", "warning"); return
         self._log(f"🔎 فحص المجلد: {folder}", "info")
         launcher = GameLauncher(self.config, self._log)
         exes = launcher.scan_folder(folder)
@@ -683,13 +748,14 @@ class MainWindow(QMainWindow):
 
     # ─── Bot Control ──────────────────────────────────────────────────────
     def _start_bot(self):
+        self._save_config_silent()
         if not self.config.get("deepseek_api_key"):
-            QMessageBox.warning(self, "تحذير", "يرجى إدخال مفتاح DeepSeek API أولاً!")
+            self._msg_box("تحذير", "يرجى إدخال مفتاح DeepSeek API أولاً!\n\nاذهب إلى تبويب الإعدادات وأدخل المفتاح.", "warning")
             return
         # تشغيل اللعبة تلقائياً إذا كان الخيار مفعّلاً
         if self.config.get("launch_on_bot_start") and self.config.get("game_exe_path"):
             self._log("🚀 تشغيل اللعبة أولاً...", "info")
-            self._launch_sequence()
+            threading.Thread(target=self._get_launcher().launch_sequence, daemon=True).start()
         self._log("جاري تشغيل البوت...", "info")
         self.bot_worker = BotWorker(self.config)
         self.bot_worker.log_signal.connect(self._log)
@@ -717,7 +783,7 @@ class MainWindow(QMainWindow):
     def _test_ai(self):
         key = self.e_key.text().strip()
         if not key:
-            QMessageBox.warning(self, "تحذير", "أدخل مفتاح API أولاً!"); return
+            self._msg_box("تحذير", "أدخل مفتاح API أولاً!", "warning"); return
         self._log("اختبار الاتصال بـ DeepSeek...", "info")
         def run():
             from deepseek_client import DeepSeekClient

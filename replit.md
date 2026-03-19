@@ -1,5 +1,17 @@
 # Workspace
 
+## Silkroad AI Bot (Desktop Application)
+
+مجلد `silkroad_ai_bot/` يحتوي على برنامج Python سطح مكتب كامل:
+- `main_gui.py` - الواجهة الرسومية العربية (PyQt5)
+- `ai_core.py` - نواة البوت (حقن حزم، منطق القتال، KS، Spot Management)
+- `deepseek_client.py` - عميل DeepSeek API
+- `system_prompt.txt` - System Prompt للذكاء الاصطناعي
+- `phbot_plugin.py` - إضافة phBot الاختيارية
+- `requirements.txt` - المكتبات المطلوبة
+- `build_exe.bat` - بناء EXE
+- `تشغيل.bat` - تشغيل مباشر
+
 ## Overview
 
 pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.

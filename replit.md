@@ -3,14 +3,27 @@
 ## Silkroad AI Bot (Desktop Application)
 
 مجلد `silkroad_ai_bot/` يحتوي على برنامج Python سطح مكتب كامل:
-- `main_gui.py` - الواجهة الرسومية العربية (PyQt5)
-- `ai_core.py` - نواة البوت (حقن حزم، منطق القتال، KS، Spot Management)
-- `deepseek_client.py` - عميل DeepSeek API
+- `main_gui.py` - الواجهة الرسومية العربية (PyQt5) — 8 تبويبات
+  - إعدادات، بوت، مهارات، جدولة، شات، أخبار، ذاكرة، سجل
+  - أيقونة System Tray + جدولة تلقائية + استراحات Anti-Ban
+- `ai_core.py` - نواة البوت (حقن حزم، بوشن تلقائي، Buff Management، إحصائيات جلسة)
+- `memory.py` - ذاكرة دائمة (حفظ تلقائي كل 60 ثانية، تقرير الجلسة، تتبع قتل/XP/Gold)
+- `deepseek_client.py` - عميل DeepSeek API (retry تلقائي، تتبع التوكن، cache)
 - `system_prompt.txt` - System Prompt للذكاء الاصطناعي
 - `phbot_plugin.py` - إضافة phBot الاختيارية
 - `requirements.txt` - المكتبات المطلوبة
 - `build_exe.bat` - بناء EXE
 - `تشغيل.bat` - تشغيل مباشر
+
+### ميزات جديدة (آخر تحديث):
+1. **تبويب المهارات** - تفعيل/تعطيل كل مهارة، ترتيب الروتين، توقيت البوشن
+2. **تبويب الجدولة** - جدولة جلسات بساعات محددة، استراحات تلقائية، ملخص الجلسة
+3. **بوشن تلقائي** - HP/MP مع حدود قابلة للضبط ومنطق anti-spam
+4. **إحصائيات الجلسة** - قتل، XP، Gold، قتل/ساعة
+5. **تصدير تقرير الجلسة** - ملف نصي بكل إحصائيات الجلسة
+6. **System Tray** - التحكم بالبوت من صينية النظام
+7. **Retry ذكي** - إعادة محاولة DeepSeek تلقائياً مع exponential backoff
+8. **Response Cache** - تخزين استجابات متطابقة لتسريع البوت
 
 ## Overview
 

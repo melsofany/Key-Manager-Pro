@@ -14,10 +14,12 @@ from PyQt5.QtWidgets import (
     QTabWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QGroupBox,
     QFormLayout, QSpinBox, QCheckBox, QComboBox, QProgressBar,
     QStatusBar, QFrame, QGridLayout, QMessageBox, QListWidget,
-    QListWidgetItem, QSplitter, QScrollArea, QFileDialog
+    QListWidgetItem, QSplitter, QScrollArea, QFileDialog,
+    QSystemTrayIcon, QAction, QMenu, QDoubleSpinBox, QSlider,
+    QTableWidget, QTableWidgetItem, QHeaderView, QTimeEdit
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread
-from PyQt5.QtGui import QFont, QTextCursor, QColor, QIcon
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, QTime
+from PyQt5.QtGui import QFont, QTextCursor, QColor, QIcon, QPixmap, QPainter, QPen, QBrush
 
 from ai_core import SilkroadAICore
 from news_fetcher import NewsFetcher
@@ -88,8 +90,16 @@ class MainWindow(QMainWindow):
         self.start_time = None
         self.news_fetcher = None
         self._launcher = None
+        self._session_kills = 0
+        self._session_xp = 0
+        self._hp_history = []
+        self._mp_history = []
+        self._break_active = False
+        self._next_break_at = None
         self._setup_ui()
         self._apply_theme()
+        self._setup_tray()
+        self._setup_scheduler_timer()
         self._log("مرحباً بك في Silkroad AI Bot — نظام التحكم الذكي", "success")
         self._log("أدخل إعداداتك واضغط تشغيل، أو تحدث مع AI في تبويب الشات", "info")
 
@@ -107,12 +117,14 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.setLayoutDirection(Qt.RightToLeft)
-        self.tabs.addTab(self._build_settings_tab(), "⚙️ الإعدادات")
-        self.tabs.addTab(self._build_bot_tab(),      "🤖 البوت")
-        self.tabs.addTab(self._build_chat_tab(),     "💬 الشات")
-        self.tabs.addTab(self._build_news_tab(),     "📰 الأخبار")
-        self.tabs.addTab(self._build_memory_tab(),   "🧠 الذاكرة")
-        self.tabs.addTab(self._build_logs_tab(),     "📋 السجل")
+        self.tabs.addTab(self._build_settings_tab(),  "⚙️ الإعدادات")
+        self.tabs.addTab(self._build_bot_tab(),       "🤖 البوت")
+        self.tabs.addTab(self._build_skills_tab(),    "🗡️ المهارات")
+        self.tabs.addTab(self._build_schedule_tab(),  "⏰ الجدولة")
+        self.tabs.addTab(self._build_chat_tab(),      "💬 الشات")
+        self.tabs.addTab(self._build_news_tab(),      "📰 الأخبار")
+        self.tabs.addTab(self._build_memory_tab(),    "🧠 الذاكرة")
+        self.tabs.addTab(self._build_logs_tab(),      "📋 السجل")
         vbox.addWidget(self.tabs)
 
         self.status_bar = QStatusBar()
@@ -197,16 +209,30 @@ class MainWindow(QMainWindow):
         self.e_spot.setValue(self.config.get("spot_empty_minutes",2)); self.e_spot.setSuffix(" دقيقة")
         self.e_zone = QLineEdit(self.config.get("farming_zone",""))
         self.e_zone.setPlaceholderText("X:1234 Y:5678")
-        self.chk_login = QCheckBox("تسجيل دخول تلقائي عند الانقطاع")
-        self.chk_login.setChecked(self.config.get("auto_login",True))
-        self.chk_quest = QCheckBox("قبول وتسليم المهام تلقائياً")
-        self.chk_quest.setChecked(self.config.get("auto_quest",True))
-        self.chk_news  = QCheckBox("متابعة أخبار اللعبة تلقائياً")
-        self.chk_news.setChecked(self.config.get("auto_news",True))
-        for lbl, w_ in [("حد HP:",self.e_hp),("حد الوحوش:",self.e_mon),
-                        ("وقت المنطقة الفارغة:",self.e_spot),("منطقة الزراعة:",self.e_zone)]:
+        self.e_hp_pot = QSpinBox(); self.e_hp_pot.setRange(1, 95)
+        self.e_hp_pot.setValue(self.config.get("hp_potion_threshold", 60)); self.e_hp_pot.setSuffix(" %")
+        self.e_mp_pot = QSpinBox(); self.e_mp_pot.setRange(1, 95)
+        self.e_mp_pot.setValue(self.config.get("mp_potion_threshold", 40)); self.e_mp_pot.setSuffix(" %")
+
+        self.chk_login    = QCheckBox("تسجيل دخول تلقائي عند الانقطاع")
+        self.chk_login.setChecked(self.config.get("auto_login", True))
+        self.chk_quest    = QCheckBox("قبول وتسليم المهام تلقائياً")
+        self.chk_quest.setChecked(self.config.get("auto_quest", True))
+        self.chk_news     = QCheckBox("متابعة أخبار اللعبة تلقائياً")
+        self.chk_news.setChecked(self.config.get("auto_news", True))
+        self.chk_auto_pot = QCheckBox("استخدام البوشن تلقائياً (HP/MP)")
+        self.chk_auto_pot.setChecked(self.config.get("use_auto_potion", True))
+        self.chk_use_phbot = QCheckBox("استخدام phBot كوسيط (Plugin Mode)")
+        self.chk_use_phbot.setChecked(self.config.get("use_phbot", False))
+        self.chk_ks_escape = QCheckBox("هروب تلقائي عند KS")
+        self.chk_ks_escape.setChecked(self.config.get("ks_auto_escape", True))
+
+        for lbl, w_ in [("حد HP:", self.e_hp), ("حد الوحوش:", self.e_mon),
+                        ("وقت المنطقة الفارغة:", self.e_spot), ("منطقة الزراعة:", self.e_zone),
+                        ("HP بوشن عند:", self.e_hp_pot), ("MP بوشن عند:", self.e_mp_pot)]:
             f3.addRow(lbl, w_)
-        for chk in [self.chk_login, self.chk_quest, self.chk_news]:
+        for chk in [self.chk_auto_pot, self.chk_login, self.chk_quest,
+                    self.chk_news, self.chk_use_phbot, self.chk_ks_escape]:
             f3.addRow("", chk)
         g3.setLayout(f3)
 
@@ -473,7 +499,11 @@ class MainWindow(QMainWindow):
         btn_clear = QPushButton("🗑️ مسح الذاكرة")
         btn_clear.setStyleSheet("background:#B71C1C;")
         btn_clear.clicked.connect(self._clear_memory)
-        ctrl.addWidget(btn_refresh); ctrl.addWidget(btn_clear); ctrl.addStretch()
+        btn_export = QPushButton("📄 تصدير تقرير الجلسة")
+        btn_export.setStyleSheet("background:#1A3A5C;")
+        btn_export.clicked.connect(self._export_session_report)
+        ctrl.addWidget(btn_refresh); ctrl.addWidget(btn_export)
+        ctrl.addWidget(btn_clear); ctrl.addStretch()
 
         g_stats = QGroupBox("📊 إحصائيات الذاكرة"); sg = QGridLayout()
         self.mem_lbl = {}
@@ -593,7 +623,7 @@ class MainWindow(QMainWindow):
     # ─── Config ───────────────────────────────────────────────────────────
     def _collect_config(self) -> dict:
         """تجميع قيم الإعدادات من الواجهة"""
-        return {
+        cfg = {
             "deepseek_api_key":    self.e_key.text().strip(),
             "deepseek_model":      self.e_model.currentText(),
             "server_name":         self.e_srv.currentText(),
@@ -607,9 +637,14 @@ class MainWindow(QMainWindow):
             "monster_threshold":   self.e_mon.value(),
             "spot_empty_minutes":  self.e_spot.value(),
             "farming_zone":        self.e_zone.text().strip(),
+            "hp_potion_threshold": self.e_hp_pot.value(),
+            "mp_potion_threshold": self.e_mp_pot.value(),
+            "use_auto_potion":     self.chk_auto_pot.isChecked(),
             "auto_login":          self.chk_login.isChecked(),
             "auto_quest":          self.chk_quest.isChecked(),
             "auto_news":           self.chk_news.isChecked(),
+            "use_phbot":           self.chk_use_phbot.isChecked(),
+            "ks_auto_escape":      self.chk_ks_escape.isChecked(),
             "game_exe_path":       self.e_game_exe.text().strip(),
             "game_folder":         self.e_game_folder.text().strip(),
             "phbot_exe_path":      self.e_phbot_exe.text().strip(),
@@ -618,6 +653,35 @@ class MainWindow(QMainWindow):
             "auto_restart_game":   self.chk_auto_restart.isChecked(),
             "launch_on_bot_start": self.chk_launch_on_start.isChecked(),
         }
+        # Skills tab fields (optional - only if tab built)
+        if hasattr(self, "skill_checks"):
+            for sid, chk in self.skill_checks.items():
+                cfg[f"skill_{sid}_enabled"] = chk.isChecked()
+        if hasattr(self, "e_rotation"):
+            cfg["skill_rotation"] = self.e_rotation.text().strip()
+        if hasattr(self, "e_skill_delay"):
+            cfg["skill_delay_ms"] = self.e_skill_delay.value()
+        if hasattr(self, "e_buff_interval"):
+            cfg["buff_interval_sec"] = self.e_buff_interval.value()
+        if hasattr(self, "e_berserk_hp"):
+            cfg["berserk_hp_min"] = self.e_berserk_hp.value()
+        if hasattr(self, "e_pot_delay"):
+            cfg["potion_delay_ms"] = self.e_pot_delay.value()
+        if hasattr(self, "e_pot_stack"):
+            cfg["potion_stack_size"] = self.e_pot_stack.value()
+        if hasattr(self, "chk_mp_combat_only"):
+            cfg["mp_potion_combat_only"] = self.chk_mp_combat_only.isChecked()
+        # Scheduler tab fields (optional)
+        if hasattr(self, "chk_scheduled"):
+            cfg["use_scheduler"]        = self.chk_scheduled.isChecked()
+            cfg["schedule_start_hour"]  = self.e_sched_start.time().hour()
+            cfg["schedule_stop_hour"]   = self.e_sched_stop.time().hour()
+            cfg["schedule_max_hours"]   = self.e_max_hours.value()
+            cfg["pause_on_repeated_dc"] = self.chk_pause_on_dc.isChecked()
+            cfg["use_breaks"]           = self.chk_breaks.isChecked()
+            cfg["break_interval_min"]   = self.e_break_interval.value()
+            cfg["break_duration_min"]   = self.e_break_duration.value()
+        return cfg
 
     def _save_config_silent(self):
         """حفظ بدون نافذة تأكيد — للاستخدام الداخلي"""
@@ -805,12 +869,25 @@ class MainWindow(QMainWindow):
         mp, mmp = s.get("mp",0), s.get("max_mp",100)
         self.hp_bar.setMaximum(mhp); self.hp_bar.setValue(hp)
         self.mp_bar.setMaximum(mmp); self.mp_bar.setValue(mp)
+
+        hp_pct = int((hp / max(mhp, 1)) * 100)
+        if hp_pct < 30:
+            self.hp_bar.setStyleSheet("QProgressBar::chunk{background:#FF1744;}")
+        elif hp_pct < 60:
+            self.hp_bar.setStyleSheet("QProgressBar::chunk{background:#FF6D00;}")
+        else:
+            self.hp_bar.setStyleSheet("QProgressBar::chunk{background:#e53935;}")
+
         self.st["cmds"].setText(str(s.get("total_commands",0)))
         self.st["dc"].setText(str(s.get("dc_count",0)))
+
+        self._session_kills = s.get("session_kills", self._session_kills)
+        self._session_xp    = s.get("session_xp", self._session_xp)
+
         if self.bot_worker:
             mem = self.bot_worker.get_memory()
             stats = mem.get_stats()
-            self.st["decisions"].setText(stats["total_decisions"])
+            self.st["decisions"].setText(str(stats["total_decisions"]))
             self.st["success"].setText(stats["success_rate"])
 
     def _tick_uptime(self):
@@ -931,8 +1008,9 @@ class MainWindow(QMainWindow):
     def _refresh_memory(self):
         if not self.bot_worker:
             self._log("شغّل البوت أولاً لعرض الذاكرة", "warning"); return
-        mem = self.bot_worker.get_memory()
+        mem   = self.bot_worker.get_memory()
         stats = mem.get_stats()
+        sess  = mem.get_session_summary()
         self.mem_lbl["decisions"].setText(str(stats["total_decisions"]))
         self.mem_lbl["deaths"].setText(str(stats["deaths_recorded"]))
         self.mem_lbl["success"].setText(stats["success_rate"])
@@ -942,6 +1020,11 @@ class MainWindow(QMainWindow):
         from ai_core import SKILL_NAMES_AR
         rotation_str = " → ".join(SKILL_NAMES_AR.get(s, str(s)) for s in best)
         self.mem_lbl["rotation"].setText(rotation_str)
+        self._log(
+            f"📊 الجلسة: قتل={sess['kills']}  XP={sess['xp']:,}  Gold={sess['gold']:,}  "
+            f"وفيات={sess['deaths']}  قتل/ساعة={sess['kills_per_hour']}",
+            "info"
+        )
         self.lessons_text.setPlainText(mem.get_lessons_summary())
         skill_lines = []
         for sid, st in mem.skill_stats.items():
@@ -951,6 +1034,21 @@ class MainWindow(QMainWindow):
             skill_lines.append(f"{name}: {st['used']} استخدام | نجاح {rate:.0f}%")
         self.skills_text.setPlainText("\n".join(skill_lines) or "لا توجد بيانات مهارات بعد")
 
+    def _export_session_report(self):
+        if not self.bot_worker:
+            self._msg_box("تحذير", "شغّل البوت أولاً لتتوفر بيانات للتصدير.", "warning")
+            return
+        mem    = self.bot_worker.get_memory()
+        report = mem.export_session_report()
+        fname  = f"session_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        try:
+            with open(fname, "w", encoding="utf-8") as f:
+                f.write(report)
+            self._log(f"📄 تم تصدير التقرير: {fname}", "success")
+            self._msg_box("تصدير ناجح", f"تم حفظ التقرير:\n{fname}", "info")
+        except Exception as e:
+            self._log(f"خطأ في التصدير: {e}", "error")
+
     def _clear_memory(self):
         r = self._msg_box("تأكيد", "هل تريد مسح الذاكرة المحفوظة؟", "question")
         if r == QMessageBox.Yes:
@@ -958,6 +1056,269 @@ class MainWindow(QMainWindow):
             for f in ["bot_memory.json", "news_cache.json"]:
                 if os.path.exists(f): os.remove(f)
             self._log("تم مسح الذاكرة", "warning")
+
+    # ─── Skills Tab ───────────────────────────────────────────────────────
+    def _build_skills_tab(self):
+        w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(10)
+
+        g_skills = QGroupBox("⚔️ تفعيل/تعطيل المهارات")
+        sg = QGridLayout(); sg.setSpacing(8)
+        self.skill_checks = {}
+        skills_list = [
+            (7650, "داريديفل (Daredevil)",      True),
+            (7652, "ضربة أرضية (Ground Impact)", True),
+            (7654, "طعنة (Stab)",                True),
+            (7656, "هجوم جماعي (Turn Fresh)",    True),
+            (7910, "جلد حديدي (Iron Skin)",      True),
+            (7660, "برسيرك (Berserk)",            False),
+            (7662, "돌진 (Charge)",               False),
+        ]
+        for i, (sid, name, default) in enumerate(skills_list):
+            r, c = divmod(i, 2)
+            chk = QCheckBox(f"  {name}  [ID: {sid}]")
+            chk.setChecked(self.config.get(f"skill_{sid}_enabled", default))
+            chk.setStyleSheet("color:#87CEEB; font-size:11px;")
+            sg.addWidget(chk, r, c)
+            self.skill_checks[sid] = chk
+        g_skills.setLayout(sg)
+
+        g_rot = QGroupBox("🔄 ترتيب روتين الهجوم (IDs مفصولة بفاصلة)")
+        rl = QVBoxLayout()
+        default_rot = self.config.get("skill_rotation", "7650,7652,7654,7656")
+        self.e_rotation = QLineEdit(default_rot)
+        self.e_rotation.setPlaceholderText("مثال: 7650,7652,7654,7656")
+        rot_info = QLabel("💡 الترتيب هو تسلسل المهارات في وضع القتال الاحتياطي (Fallback Mode)")
+        rot_info.setStyleSheet("color:#888; font-size:10px;")
+        rot_info.setWordWrap(True)
+        rl.addWidget(self.e_rotation)
+        rl.addWidget(rot_info)
+        g_rot.setLayout(rl)
+
+        g_timing = QGroupBox("⏱️ توقيت المهارات")
+        tf = QFormLayout()
+        self.e_skill_delay = QSpinBox()
+        self.e_skill_delay.setRange(300, 5000)
+        self.e_skill_delay.setValue(self.config.get("skill_delay_ms", 800))
+        self.e_skill_delay.setSuffix(" ms")
+        self.e_buff_interval = QSpinBox()
+        self.e_buff_interval.setRange(10, 120)
+        self.e_buff_interval.setValue(self.config.get("buff_interval_sec", 30))
+        self.e_buff_interval.setSuffix(" ثانية")
+        self.e_berserk_hp = QSpinBox()
+        self.e_berserk_hp.setRange(50, 100)
+        self.e_berserk_hp.setValue(self.config.get("berserk_hp_min", 70))
+        self.e_berserk_hp.setSuffix(" %")
+        tf.addRow("تأخير بين المهارات:", self.e_skill_delay)
+        tf.addRow("تجديد Buffs كل:", self.e_buff_interval)
+        tf.addRow("Berserk عند HP أعلى من:", self.e_berserk_hp)
+        g_timing.setLayout(tf)
+
+        g_potion = QGroupBox("💊 إعدادات البوشن")
+        pf = QFormLayout()
+        self.e_pot_delay = QSpinBox()
+        self.e_pot_delay.setRange(500, 5000)
+        self.e_pot_delay.setValue(self.config.get("potion_delay_ms", 1500))
+        self.e_pot_delay.setSuffix(" ms")
+        self.e_pot_stack = QSpinBox()
+        self.e_pot_stack.setRange(1, 999)
+        self.e_pot_stack.setValue(self.config.get("potion_stack_size", 100))
+        self.chk_mp_combat_only = QCheckBox("استخدام MP بوشن فقط في القتال")
+        self.chk_mp_combat_only.setChecked(self.config.get("mp_potion_combat_only", False))
+        pf.addRow("تأخير البوشن:", self.e_pot_delay)
+        pf.addRow("حجم الكدسة (Stack):", self.e_pot_stack)
+        pf.addRow("", self.chk_mp_combat_only)
+        g_potion.setLayout(pf)
+
+        btn_save_skills = QPushButton("💾 حفظ إعدادات المهارات")
+        btn_save_skills.setMinimumHeight(38)
+        btn_save_skills.setStyleSheet("background:#1B5E20; font-size:13px; font-weight:bold;")
+        btn_save_skills.clicked.connect(self._save_config_silent)
+
+        row = QHBoxLayout(); row.addWidget(g_skills); row.addWidget(g_potion)
+        lay.addLayout(row)
+        lay.addWidget(g_rot)
+        lay.addWidget(g_timing)
+        lay.addWidget(btn_save_skills)
+        return w
+
+    # ─── Schedule Tab ──────────────────────────────────────────────────────
+    def _build_schedule_tab(self):
+        w = QWidget(); lay = QVBoxLayout(w); lay.setSpacing(10)
+
+        g_sched = QGroupBox("⏰ جدولة جلسات الزراعة")
+        sf = QFormLayout()
+        self.chk_scheduled = QCheckBox("تفعيل الجدولة التلقائية")
+        self.chk_scheduled.setChecked(self.config.get("use_scheduler", False))
+
+        self.e_sched_start = QTimeEdit()
+        self.e_sched_start.setDisplayFormat("HH:mm")
+        self.e_sched_start.setTime(QTime(self.config.get("schedule_start_hour", 22), 0))
+
+        self.e_sched_stop = QTimeEdit()
+        self.e_sched_stop.setDisplayFormat("HH:mm")
+        self.e_sched_stop.setTime(QTime(self.config.get("schedule_stop_hour", 6), 0))
+
+        self.e_max_hours = QSpinBox()
+        self.e_max_hours.setRange(1, 24)
+        self.e_max_hours.setValue(self.config.get("schedule_max_hours", 8))
+        self.e_max_hours.setSuffix(" ساعة")
+
+        self.chk_pause_on_dc = QCheckBox("إيقاف مؤقت عند انقطاع متكرر (3+ مرات)")
+        self.chk_pause_on_dc.setChecked(self.config.get("pause_on_repeated_dc", True))
+
+        sf.addRow("", self.chk_scheduled)
+        sf.addRow("بدء الزراعة:", self.e_sched_start)
+        sf.addRow("إيقاف الزراعة:", self.e_sched_stop)
+        sf.addRow("الحد الأقصى:", self.e_max_hours)
+        sf.addRow("", self.chk_pause_on_dc)
+        g_sched.setLayout(sf)
+
+        self.schedule_status_lbl = QLabel("⚪ الجدولة غير مفعّلة")
+        self.schedule_status_lbl.setStyleSheet(
+            "color:#FFD700; font-size:13px; font-weight:bold; "
+            "background:#1A1A1A; padding:8px; border-radius:5px;"
+        )
+
+        g_breaks = QGroupBox("☕ استراحات تلقائية (Anti-Ban)")
+        bf = QFormLayout()
+        self.chk_breaks = QCheckBox("استراحة دورية مع إيقاف البوت مؤقتاً")
+        self.chk_breaks.setChecked(self.config.get("use_breaks", False))
+        self.e_break_interval = QSpinBox()
+        self.e_break_interval.setRange(30, 360)
+        self.e_break_interval.setValue(self.config.get("break_interval_min", 90))
+        self.e_break_interval.setSuffix(" دقيقة")
+        self.e_break_duration = QSpinBox()
+        self.e_break_duration.setRange(1, 30)
+        self.e_break_duration.setValue(self.config.get("break_duration_min", 5))
+        self.e_break_duration.setSuffix(" دقيقة")
+        bf.addRow("", self.chk_breaks)
+        bf.addRow("استراحة كل:", self.e_break_interval)
+        bf.addRow("مدة الاستراحة:", self.e_break_duration)
+        g_breaks.setLayout(bf)
+
+        g_session = QGroupBox("📊 ملخص الجلسة الحالية")
+        sl = QGridLayout()
+        self.sched_lbl = {}
+        for i, (k, t) in enumerate([
+            ("kills",   "وحوش منتهية"),
+            ("xp",      "XP تقريبي"),
+            ("gold",    "Gold تقريبي"),
+            ("breaks",  "استراحات نُفّذت"),
+            ("uptime2", "وقت نشط"),
+            ("dc_count2", "انقطاعات"),
+        ]):
+            r, c = divmod(i, 2)
+            sl.addWidget(QLabel(f"{t}:"), r, c * 2)
+            lbl = QLabel("—")
+            lbl.setStyleSheet("color:#FFD700; font-weight:bold;")
+            sl.addWidget(lbl, r, c * 2 + 1)
+            self.sched_lbl[k] = lbl
+        g_session.setLayout(sl)
+
+        btn_save_sched = QPushButton("💾 حفظ إعدادات الجدولة")
+        btn_save_sched.setMinimumHeight(38)
+        btn_save_sched.setStyleSheet("background:#4A148C; font-size:13px; font-weight:bold;")
+        btn_save_sched.clicked.connect(self._save_config_silent)
+
+        lay.addWidget(g_sched)
+        lay.addWidget(self.schedule_status_lbl)
+        lay.addWidget(g_breaks)
+        lay.addWidget(g_session)
+        lay.addWidget(btn_save_sched)
+        return w
+
+    # ─── System Tray ──────────────────────────────────────────────────────
+    def _setup_tray(self):
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        pix = QPixmap(32, 32)
+        pix.fill(Qt.transparent)
+        p = QPainter(pix)
+        p.setBrush(QBrush(QColor("#FFD700")))
+        p.setPen(QPen(QColor("#B8860B"), 2))
+        p.drawEllipse(4, 4, 24, 24)
+        p.setPen(QPen(QColor("#000"), 2))
+        p.setFont(QFont("Arial", 12, QFont.Bold))
+        p.drawText(8, 22, "⚔")
+        p.end()
+        self.tray = QSystemTrayIcon(QIcon(pix), self)
+        menu = QMenu()
+        menu.setLayoutDirection(Qt.RightToLeft)
+        act_show  = QAction("🔍 إظهار", self); act_show.triggered.connect(self.show)
+        act_start = QAction("▶ تشغيل البوت", self); act_start.triggered.connect(self._start_bot)
+        act_stop  = QAction("⏹ إيقاف البوت",  self); act_stop.triggered.connect(self._stop_bot)
+        act_quit  = QAction("❌ إغلاق",        self); act_quit.triggered.connect(self.close)
+        for a in [act_show, act_start, act_stop, act_quit]:
+            menu.addAction(a)
+        self.tray.setContextMenu(menu)
+        self.tray.setToolTip("Silkroad AI Bot")
+        self.tray.activated.connect(lambda r: self.show() if r == QSystemTrayIcon.DoubleClick else None)
+        self.tray.show()
+
+    # ─── Scheduler Timer ──────────────────────────────────────────────────
+    def _setup_scheduler_timer(self):
+        self._sched_timer = QTimer()
+        self._sched_timer.timeout.connect(self._scheduler_tick)
+        self._sched_timer.start(30_000)
+        self._session_break_count = 0
+
+    def _scheduler_tick(self):
+        now = datetime.now()
+        # Update session summary labels
+        if hasattr(self, "sched_lbl"):
+            self.sched_lbl["kills"].setText(str(self._session_kills))
+            self.sched_lbl["xp"].setText(f"{self._session_xp:,}")
+            self.sched_lbl["gold"].setText(f"{self._session_kills * 450:,}")
+            self.sched_lbl["breaks"].setText(str(self._session_break_count))
+            if self.start_time:
+                elapsed = int(time.time() - self.start_time)
+                h, m = elapsed // 3600, (elapsed % 3600) // 60
+                self.sched_lbl["uptime2"].setText(f"{h:02d}:{m:02d}")
+            if self.bot_worker:
+                self.sched_lbl["dc_count2"].setText(str(self.bot_worker.core.dc_count))
+
+        if not self.config.get("use_scheduler", False):
+            if hasattr(self, "schedule_status_lbl"):
+                self.schedule_status_lbl.setText("⚪ الجدولة غير مفعّلة")
+            return
+
+        start_h = self.config.get("schedule_start_hour", 22)
+        stop_h  = self.config.get("schedule_stop_hour",  6)
+        cur_h   = now.hour
+        in_window = (start_h > stop_h and (cur_h >= start_h or cur_h < stop_h)) or \
+                    (start_h <= stop_h and start_h <= cur_h < stop_h)
+
+        if in_window and not self.bot_worker:
+            if hasattr(self, "schedule_status_lbl"):
+                self.schedule_status_lbl.setText("🟢 في نافذة الزراعة — جارٍ التشغيل...")
+            self._start_bot()
+        elif not in_window and self.bot_worker:
+            if hasattr(self, "schedule_status_lbl"):
+                self.schedule_status_lbl.setText("🔴 خارج نافذة الزراعة — إيقاف...")
+            self._stop_bot()
+        elif in_window:
+            if hasattr(self, "schedule_status_lbl"):
+                self.schedule_status_lbl.setText(
+                    f"🟢 جلسة نشطة | نافذة: {start_h:02d}:00 → {stop_h:02d}:00"
+                )
+        # Handle breaks
+        if self.config.get("use_breaks") and self.bot_worker and not self._break_active:
+            interval_sec = self.config.get("break_interval_min", 90) * 60
+            if self.start_time and (time.time() - self.start_time) % interval_sec < 35:
+                self._break_active = True
+                dur = self.config.get("break_duration_min", 5)
+                self._log(f"☕ استراحة تلقائية لمدة {dur} دقيقة...", "warning")
+                self._session_break_count += 1
+                if hasattr(self, "schedule_status_lbl"):
+                    self.schedule_status_lbl.setText(f"☕ استراحة — {dur} دقيقة")
+                self.bot_worker.core.pause()
+                QTimer.singleShot(dur * 60 * 1000, self._end_break)
+
+    def _end_break(self):
+        self._break_active = False
+        if self.bot_worker:
+            self.bot_worker.core.resume()
+            self._log("▶️ انتهت الاستراحة — استئناف الزراعة", "success")
 
     # ─── Close ────────────────────────────────────────────────────────────
     def closeEvent(self, event):
